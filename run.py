@@ -9,6 +9,9 @@ import webbrowser
 
 from cipherpulse import config  # loads .env
 
+# Render (and most hosts) set PORT. Locally it is not set.
+ON_HOST = bool(os.environ.get("PORT"))
+
 
 def free_port(host, start):
     """First port >= start that we can actually bind (skips busy and Windows-reserved ports)."""
@@ -38,14 +41,24 @@ def wait_open(host, port, timeout=40):
 def main():
     import uvicorn
 
-    port = free_port(config.HOST, config.PORT)
+    if ON_HOST:
+        # Render: listen on all interfaces, on the port Render gives us
+        bind_host = "0.0.0.0"
+        port = int(os.environ["PORT"])
+        os.environ["CP_NO_BROWSER"] = "1"
+    else:
+        # Local: same as before
+        bind_host = config.HOST
+        port = free_port(config.HOST, config.PORT)
+
     os.environ["CP_PORT"] = str(port)
     config.PORT = port
     url = f"http://localhost:{port}"
     holder = {}
 
     def after_start():
-        if not wait_open(config.HOST, port):
+        # Check the app on loopback; it works for both 127.0.0.1 and 0.0.0.0 binds
+        if not wait_open("127.0.0.1", port):
             return
         holder["p"] = subprocess.Popen([sys.executable, "-m", "cipherpulse.sensor.run_sensors"])
         if not os.environ.get("CP_NO_BROWSER"):
@@ -58,7 +71,7 @@ def main():
     print("  Keep this window open. Press Ctrl+C to stop.")
     print("=" * 60, flush=True)
     try:
-        uvicorn.run("cipherpulse.gateway.app:app", host=config.HOST, port=port, log_level="warning")
+        uvicorn.run("cipherpulse.gateway.app:app", host=bind_host, port=port, log_level="warning")
     finally:
         if holder.get("p"):
             holder["p"].terminate()
